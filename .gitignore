@@ -1,0 +1,6 @@
+node_modules/
+bun.lockb
+*.log
+# never commit credentials or local state
+sa-key.json
+.env

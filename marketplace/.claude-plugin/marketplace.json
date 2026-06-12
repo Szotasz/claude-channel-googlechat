@@ -1,0 +1,13 @@
+{
+  "name": "claude-channel-googlechat",
+  "owner": {
+    "name": "buglime"
+  },
+  "plugins": [
+    {
+      "name": "googlechat",
+      "source": "./..",
+      "description": "Google Chat channel for Claude Code over Cloud Pub/Sub, with identity-based (Workspace email) access control."
+    }
+  ]
+}

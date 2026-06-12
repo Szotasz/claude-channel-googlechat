@@ -1,0 +1,13 @@
+{
+  "name": "googlechat",
+  "description": "Google Chat channel for Claude Code — Workspace messaging bridge over Cloud Pub/Sub with identity-based access control. Manage allowlists, domains, owner/roles, and spaces via /googlechat:access.",
+  "version": "0.0.1",
+  "keywords": [
+    "google-chat",
+    "workspace",
+    "messaging",
+    "channel",
+    "mcp",
+    "pubsub"
+  ]
+}

@@ -92,7 +92,7 @@ export async function uploadAttachment(space: string, filePath: string, mimeType
 /** Download an uploaded attachment's bytes by its resourceName (media.download). */
 export async function downloadMedia(resourceName: string): Promise<Buffer> {
   const res = await chat().media.download(
-    { resourceName },
+    { resourceName, alt: 'media' },
     { responseType: 'arraybuffer' },
   )
   return Buffer.from(res.data as ArrayBuffer)

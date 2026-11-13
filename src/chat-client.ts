@@ -18,7 +18,13 @@ function chat() {
   return client
 }
 
-export type SentMessage = { name: string }
+/** `thread` is the thread the API put the message in (a new one when none was asked for). */
+export type SentMessage = { name: string; thread?: string }
+
+export function sentMessage(data: { name?: string | null; thread?: { name?: string | null } | null }, fallbackName = ''): SentMessage {
+  const thread = data.thread?.name ?? undefined
+  return { name: data.name ?? fallbackName, ...(thread ? { thread } : {}) }
+}
 
 /**
  * How a threaded create behaves when the thread cannot be replied to.
@@ -72,7 +78,7 @@ export async function createMessage(
   opts: CreateOptions = {},
 ): Promise<SentMessage> {
   const res = await chat().spaces.messages.create(createRequest(space, text, threadName, undefined, opts))
-  return { name: res.data.name ?? '' }
+  return sentMessage(res.data)
 }
 
 /** Create a message that carries one or more already-uploaded attachments. */
@@ -84,7 +90,7 @@ export async function createMessageWithAttachments(
   opts: CreateOptions = {},
 ): Promise<SentMessage> {
   const res = await chat().spaces.messages.create(createRequest(space, text, threadName, attachments, opts))
-  return { name: res.data.name ?? '' }
+  return sentMessage(res.data)
 }
 
 /**
@@ -104,7 +110,7 @@ export async function patchMessage(name: string, text: string): Promise<SentMess
     updateMask: 'text',
     requestBody: { text },
   })
-  return { name: res.data.name ?? name }
+  return sentMessage(res.data, name)
 }
 
 /** Add an emoji reaction. Best-effort: app reactions are often restricted. */

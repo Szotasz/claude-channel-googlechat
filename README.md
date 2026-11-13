@@ -63,6 +63,36 @@ can branch on it (e.g. give the owner full scope and company users a limited one
 | `react` | Add an emoji reaction. **Best-effort** — app reactions are restricted in many Workspace configs. |
 | `edit_message` | Edit one of the bot's own messages (interim progress). Not chunked. |
 | `download_attachment` | Download an uploaded attachment to the local inbox. (Drive-file attachments unsupported in v1.) |
+| `local_history` | What this bot itself saw of a thread, from a local log (see below). Not the full thread. Listed only while the log is on. |
+
+## Local history
+
+This plugin does not read a thread back from Google: it only sees messages as
+they arrive. An agent that lost its context (a restart, a long conversation)
+could therefore not re-read what it was answering. So the plugin keeps a small
+log of its own:
+
+- **What is in it:** the inbound messages that passed the access gate and were
+  delivered, and the messages the bot sent with `reply` (and their edits).
+- **What is not:** messages the bot was not mentioned in, messages the gate
+  dropped, anything from before the log existed or while the server was down,
+  and edits or deletions made by people. `local_history` says this to the model
+  on every call, so it does not read a gap as "nobody said that".
+- **How it is read:** one thread at a time (`thread` is the inbound
+  `meta.thread` or `meta.message_id`). A named space is never returned whole; a
+  direct message needs no thread. Only spaces the bot may write to can be read.
+- **Where it lives:** `history/log.jsonl` under the state dir, directory `0700`,
+  file `0600`. It holds message text. It cannot be sent as an attachment.
+- **How long:** 14 days and at most 5 MB by default, the oldest records going
+  first. Both bounds are enforced on disk at start, every hour and on writes,
+  and an expired record is never returned in between. While the server is not
+  running nothing is removed: the file is trimmed at the next start.
+- **Switching it off:** `GOOGLECHAT_HISTORY_DAYS=0`. Nothing is written, the
+  tool is not listed, and an existing log is deleted at the next start.
+
+The sender's display label is cleaned before it is stored (one line, no
+invisible or direction-changing characters, no tag or quote delimiters, at most
+64 characters), because it is sender-chosen text that is later shown to a model.
 
 ## Email resolution
 
@@ -96,6 +126,8 @@ guards the same machine; only distinct subscriptions protect across machines.
 | `GOOGLECHAT_ADMIN_IMPERSONATE` | Admin email to impersonate for Directory lookups (optional, recommended). |
 | `GOOGLECHAT_STATE_DIR` | Override the state dir (default `~/.claude/channels/googlechat`). |
 | `GOOGLECHAT_ACCESS_MODE=static` | Snapshot `access.json` at boot (no re-read). |
+| `GOOGLECHAT_HISTORY_DAYS` | How long the local history keeps a message, in days. Default `14`, at most `90`. `0` switches it off and deletes the log. A value that is not a number also means off. |
+| `GOOGLECHAT_HISTORY_MAX_MB` | Size cap of the local history file. Default `5`, at most `50`. |
 
 ## License
 

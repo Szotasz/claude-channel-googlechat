@@ -18,6 +18,7 @@ export const INBOX_DIR = join(STATE_DIR, 'inbox')
 export const APPROVED_DIR = join(STATE_DIR, 'approved')
 export const PID_FILE = join(STATE_DIR, 'bot.pid')
 export const SA_KEY_FILE = join(STATE_DIR, 'sa-key.json')
+export const HISTORY_DIR = join(STATE_DIR, 'history')
 
 // Load STATE_DIR/.env into process.env. Real env wins. Plugin-spawned servers
 // don't get an env block — this is where the credentials live.
@@ -58,6 +59,41 @@ export const SUBSCRIPTION = RAW_SUBSCRIPTION.includes('/')
   : RAW_SUBSCRIPTION
 export const ADMIN_IMPERSONATE = process.env.GOOGLECHAT_ADMIN_IMPERSONATE ?? ''
 export const STATIC = process.env.GOOGLECHAT_ACCESS_MODE === 'static'
+
+/**
+ * A bounded number from the environment. Unset: the default. A value that is
+ * not a number switches the feature off (0) and says so, because what it
+ * bounds is message text kept on disk: a typo must not mean "keep more".
+ */
+export function boundedNumber(name: string, raw: string | undefined, fallback: number, max: number): number {
+  if (raw === undefined || raw.trim() === '') return fallback
+  const value = Number(raw.trim())
+  if (!Number.isFinite(value) || value < 0) {
+    process.stderr.write(`googlechat channel: ${name}=${JSON.stringify(raw)} is not a number of 0 or more, treating it as 0 (off)\n`)
+    return 0
+  }
+  return Math.min(value, max)
+}
+
+// Local history (src/history.ts): what this bot saw, kept for a bounded time.
+// Off by default: it puts other people's message text on disk, so the operator
+// switches it on (GOOGLECHAT_HISTORY_DAYS=14, say); an update must not.
+export const HISTORY_DEFAULT_DAYS = 0
+export const HISTORY_MAX_DAYS = 90
+export const HISTORY_DEFAULT_MB = 5
+export const HISTORY_MAX_MB = 50
+/** Retention in days. 0 or unset: the local history is off, and a log left on disk is removed. */
+export const HISTORY_DAYS = boundedNumber(
+  'GOOGLECHAT_HISTORY_DAYS',
+  process.env.GOOGLECHAT_HISTORY_DAYS,
+  HISTORY_DEFAULT_DAYS,
+  HISTORY_MAX_DAYS,
+)
+export const HISTORY_MAX_BYTES = Math.floor(
+  boundedNumber('GOOGLECHAT_HISTORY_MAX_MB', process.env.GOOGLECHAT_HISTORY_MAX_MB, HISTORY_DEFAULT_MB, HISTORY_MAX_MB) *
+    1024 *
+    1024,
+)
 
 export const CHAT_SCOPE = 'https://www.googleapis.com/auth/chat.bot'
 export const DIRECTORY_SCOPE = 'https://www.googleapis.com/auth/admin.directory.user.readonly'

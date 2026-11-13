@@ -12,6 +12,7 @@ import { resolveEmail, displayUser, type Sender } from './identity.js'
 import { downloadMedia } from './chat-client.js'
 import type { ChatEvent } from './pubsub.js'
 import { rememberDmSpace, rememberInbound } from './threading.js'
+import { history } from './history.js'
 
 // Permission-reply spec (anthropics/claude-cli-internal): "yes/no <5 letters>".
 const PERMISSION_REPLY_RE = /^\s*(y|yes|n|no)\s+([a-km-z]{5})\s*$/i
@@ -158,6 +159,7 @@ export async function handleEvent(event: ChatEvent, mcp: { notification: (n: any
   // A threaded reply in a direct message keeps the lenient reply option.
   if (isDM) rememberDmSpace(spaceName)
 
+  let delivered = true
   await mcp
     .notification({
       method: 'notifications/claude/channel',
@@ -184,6 +186,25 @@ export async function handleEvent(event: ChatEvent, mcp: { notification: (n: any
       },
     })
     .catch(err => {
+      delivered = false
       process.stderr.write(`googlechat channel: failed to deliver inbound to Claude: ${err}\n`)
     })
+
+  // Local history holds what was delivered, and only that: a message the gate
+  // dropped returned above, and one that never reached Claude is not logged.
+  if (delivered) {
+    history.record({
+      dir: 'in',
+      space: spaceName,
+      thread: threadName,
+      message: messageId,
+      user: displayUser(sender, email),
+      user_id: sender?.name,
+      role,
+      dm: isDM,
+      text,
+      ts,
+      attachment: att ? (att.name ?? att.kind) : undefined,
+    })
+  }
 }

@@ -10,3 +10,7 @@ import { join } from 'path'
 export const STATE = process.env.GOOGLECHAT_TEST_STATE_DIR ?? mkdtempSync(join(tmpdir(), 'gchat-test-'))
 process.env.GOOGLECHAT_TEST_STATE_DIR = STATE
 process.env.GOOGLECHAT_STATE_DIR = STATE
+// The local history is off unless switched on; the tests of what feeds it run
+// with it on. (test/history-tool.test.ts checks the unset default in a child.)
+process.env.GOOGLECHAT_HISTORY_DAYS = '14'
+delete process.env.GOOGLECHAT_HISTORY_MAX_MB

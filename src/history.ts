@@ -18,8 +18,9 @@
  *     records go first).
  *   - days = 0 (the default) is off: nothing is written, and the file is removed.
  *
- * One JSON object per line. The sender's display label is cleaned before it is
- * stored: it is sender-controlled text that is later shown to a model.
+ * One JSON object per line. Whatever label a record is given is cleaned again
+ * here (src/label.ts) before it is stored: it may be sender-chosen text, and it
+ * is later shown to a model.
  *
  * Off unless the operator switches it on (GOOGLECHAT_HISTORY_DAYS): keeping
  * other people's message text on disk is a decision, not a default.
@@ -36,6 +37,7 @@ import {
 } from 'fs'
 import { join } from 'path'
 import { HISTORY_DIR, HISTORY_DAYS, HISTORY_MAX_BYTES } from './config.js'
+import { cleanLabel } from './label.js'
 
 export type HistoryRecord = {
   /** ms epoch on this machine's clock when the record was written. Retention runs on it. */
@@ -75,7 +77,6 @@ export type HistoryOptions = {
 }
 
 export const MAX_TEXT_CHARS = 8192
-export const MAX_LABEL_CHARS = 64
 export const DEFAULT_READ_LIMIT = 30
 export const MAX_READ_LIMIT = 100
 
@@ -86,28 +87,6 @@ const PRUNE_EVERY_MS = 60 * 60 * 1000
 // After a size-triggered prune the file is cut to this share of the cap, so a
 // busy log is not rewritten on every append.
 const KEEP_SHARE = 0.75
-
-// Control characters, zero-width and bidirectional controls, line separators.
-const INVISIBLE_RE = /[\u0000-\u001f\u007f-\u009f\u00ad\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g
-// Characters that delimit something where the label is later shown.
-const DELIMITER_RE = /[<>\[\]{}"`;\\]/g
-
-/**
- * A sender-controlled label made safe to store and to show to a model later:
- * one line, no invisible or direction-changing characters, no delimiter that
- * could close a tag or a quote, bounded length. Compatibility forms are folded
- * first, so a full-width bracket does not slip past as "not a bracket".
- */
-export function cleanLabel(value: string | undefined | null): string {
-  const cleaned = String(value ?? '')
-    .normalize('NFKC')
-    .replace(INVISIBLE_RE, ' ')
-    .replace(DELIMITER_RE, '_')
-    .replace(/\s+/g, ' ')
-    .trim()
-  const chars = Array.from(cleaned)
-  return chars.length > MAX_LABEL_CHARS ? chars.slice(0, MAX_LABEL_CHARS).join('') : cleaned
-}
 
 type Line = { rec: HistoryRecord; raw: string }
 

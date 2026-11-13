@@ -16,6 +16,7 @@ import { readFileSync } from 'fs'
 import { JWT } from 'google-auth-library'
 import { admin as adminApi } from '@googleapis/admin'
 import { KEY_FILE, DIRECTORY_SCOPE, ADMIN_IMPERSONATE } from './config.js'
+import { cleanLabel } from './label.js'
 
 export type Sender = {
   name?: string // users/123
@@ -88,7 +89,15 @@ export async function resolveEmail(sender: Sender | undefined): Promise<string |
   return undefined
 }
 
-/** Best display label for meta.user: email → displayName → users/<id>. */
+/**
+ * Best display label for meta.user: email, else display name, else users/<id>.
+ *
+ * The email (resolved Workspace identity) and the users/<id> name come from
+ * Google and are returned exactly as they are: other code compares meta.user
+ * with a configured email. Only the display name is sender-chosen text, and
+ * only it is cleaned (src/label.ts) before it is put in front of a model. A
+ * display name with nothing left in it falls through to the id.
+ */
 export function displayUser(sender: Sender | undefined, email: string | undefined): string {
-  return email ?? sender?.displayName ?? sender?.name ?? 'unknown'
+  return email ?? (cleanLabel(sender?.displayName) || undefined) ?? sender?.name ?? 'unknown'
 }

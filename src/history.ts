@@ -16,10 +16,13 @@
  *   - bounded age (records older than `days` are removed at start, hourly and
  *     on writes, and never returned in between) and bounded size (the oldest
  *     records go first).
- *   - days = 0 switches it off: nothing is written, and the file is removed.
+ *   - days = 0 (the default) is off: nothing is written, and the file is removed.
  *
  * One JSON object per line. The sender's display label is cleaned before it is
  * stored: it is sender-controlled text that is later shown to a model.
+ *
+ * Off unless the operator switches it on (GOOGLECHAT_HISTORY_DAYS): keeping
+ * other people's message text on disk is a decision, not a default.
  */
 import {
   appendFileSync,

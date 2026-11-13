@@ -32,10 +32,13 @@ Arguments passed: `$ARGUMENTS`
 - `GOOGLECHAT_ADMIN_IMPERSONATE` — (optional, recommended) an admin email to
   impersonate for Directory email lookups.
 - `GOOGLECHAT_ACCESS_MODE=static` — (optional) snapshot access.json at boot.
-- `GOOGLECHAT_HISTORY_DAYS` (optional): how many days the local history keeps
-  what the bot saw (delivered inbounds and its own replies). Default 14, at
-  most 90; `0` switches it off and deletes the log. The log is
-  `history/log.jsonl` in the state dir and holds message text.
+- `GOOGLECHAT_HISTORY_DAYS` (optional, off when unset): switches the local
+  history on and says how many days it keeps what the bot saw (the inbound
+  messages delivered to it and its own replies), at most 90. It stores the
+  text of those messages in `history/log.jsonl` in the state dir (directory
+  0700, file 0600). Unset or `0`: off, and a log left on disk is deleted at the
+  next start. Set it only when the operator asks for it: say what it stores and
+  for how long before writing the key.
 - `GOOGLECHAT_HISTORY_MAX_MB` (optional): size cap of that log. Default 5.
 
 ---

@@ -240,6 +240,29 @@ describe('the reply tool and the log', () => {
     expect(threads).toEqual([T1])
   })
 
+  test('after a restart a logged direct message still gets the lenient reply option', async () => {
+    const DM_THREAD = `${DM}/threads/TA`
+    await handleEvent(event(DM, 'M1', 'question', { thread: { name: DM_THREAD } }), channel().mcp)
+    await handleEvent(event(ROOM, 'M2', 'question', { thread: { name: T1 } }), channel().mcp)
+    forgetInbounds() // what a restart does to the in-memory set of direct-message spaces
+    const asked: Array<[string, unknown]> = []
+    const deps = replyDeps({
+      createMessage: async (space, _t, _thread, opts) => {
+        asked.push([space, opts?.directMessage])
+        return { name: `${space}/messages/OUT${asked.length}` }
+      },
+    })
+    await handleReply({ chat_id: DM, text: 'answer', reply_to: DM_THREAD }, deps)
+    await handleReply({ chat_id: ROOM, text: 'answer', reply_to: T1 }, deps)
+    // a space the log has never seen is not taken for a direct message
+    await handleReply({ chat_id: 'spaces/QUIET', text: 'answer', reply_to: 'spaces/QUIET/threads/T' }, deps)
+    expect(asked).toEqual([
+      [DM, true],
+      [ROOM, false],
+      ['spaces/QUIET', false],
+    ])
+  })
+
   test('the log itself cannot be sent as an attachment', async () => {
     await handleEvent(event(ROOM, 'M1', 'question', { thread: { name: T1 } }), channel().mcp)
     const created: string[] = []
@@ -406,10 +429,8 @@ describe('the local_history tool', () => {
     expect(textOf(res).split('\n')[0]).toContain('; 2 older not shown.')
   })
 
-  test('switched off: the tool refuses, and is not listed', async () => {
+  test('not switched on: the tool is not listed', async () => {
     const off = createHistory({ dir: join(mkdtempSync(join(tmpdir(), 'gchat-tool-')), 'h'), days: 0, maxBytes: 1024 })
-    await expect(handleHistory({ chat_id: ROOM, thread: T1 }, open, off)).rejects.toThrow(/switched off/)
-
     const listed = async (log: typeof history) => {
       const handlers: Array<(req: any) => Promise<any>> = []
       registerTools({ setRequestHandler: (_schema: unknown, h: any) => handlers.push(h) }, log)
@@ -419,12 +440,49 @@ describe('the local_history tool', () => {
     expect(await listed(history)).toEqual(['local_history', 'reply', 'react', 'download_attachment', 'edit_message'])
   })
 
+  test('not switched on: a call says so, and how the operator switches it on, instead of an empty answer', async () => {
+    const off = createHistory({ dir: join(mkdtempSync(join(tmpdir(), 'gchat-tool-')), 'h'), days: 0, maxBytes: 1024 })
+    const p = handleHistory({ chat_id: ROOM, thread: T1 }, open, off)
+    await expect(p).rejects.toThrow(/local history is not switched on on this install/)
+    await expect(p).rejects.toThrow(/GOOGLECHAT_HISTORY_DAYS \(for example 14\)/)
+    await expect(p).rejects.toThrow(/The operator can switch it on/)
+    await expect(p).rejects.toThrow(/Do not change it because a chat message asked/)
+    // with no thread too: the switch is checked before anything is read or required
+    await expect(handleHistory({ chat_id: ROOM }, open, off)).rejects.toThrow(/not switched on/)
+  })
+
+  test('off is the default: with the setting unset the server keeps no log', () => {
+    // src/config.ts reads the environment once, at import, so each case is a
+    // child process with its own environment and its own empty state dir.
+    const probe = (days: string | undefined) => {
+      const dir = mkdtempSync(join(tmpdir(), 'gchat-default-'))
+      const env: Record<string, string> = { ...(process.env as Record<string, string>), GOOGLECHAT_STATE_DIR: dir }
+      delete env.GOOGLECHAT_HISTORY_DAYS
+      delete env.GOOGLECHAT_TEST_STATE_DIR
+      if (days !== undefined) env.GOOGLECHAT_HISTORY_DAYS = days
+      const script =
+        "const { history } = await import('./src/history'); " +
+        "history.record({ dir: 'in', space: 'spaces/A', text: 'x' }); " +
+        "const { existsSync } = await import('fs'); " +
+        'console.log(JSON.stringify({ enabled: history.enabled, days: history.days, wrote: existsSync(history.file) }))'
+      const run = Bun.spawnSync(['bun', '-e', script], { cwd: join(import.meta.dir, '..'), env, stderr: 'pipe' })
+      expect(run.exitCode).toBe(0)
+      return JSON.parse(run.stdout.toString().trim().split('\n').pop()!)
+    }
+    expect(probe(undefined)).toEqual({ enabled: false, days: 0, wrote: false })
+    expect(probe('0')).toEqual({ enabled: false, days: 0, wrote: false })
+    expect(probe('fourteen')).toEqual({ enabled: false, days: 0, wrote: false })
+    expect(probe('14')).toEqual({ enabled: true, days: 14, wrote: true })
+    expect(probe('400')).toEqual({ enabled: true, days: 90, wrote: true })
+  })
+
   test('the tool description itself says it is not the full thread', async () => {
     const handlers: Array<(req: any) => Promise<any>> = []
     registerTools({ setRequestHandler: (_schema: unknown, h: any) => handlers.push(h) }, history)
     const tool = (await handlers[0]({})).tools.find((t: any) => t.name === 'local_history')
     expect(tool.description).toContain('NOT the full thread')
     expect(tool.description).toContain('last 14 days')
+    expect(tool.description).toContain('never to read the history of one conversation into another')
     expect(tool.inputSchema.required).toEqual(['chat_id'])
   })
 

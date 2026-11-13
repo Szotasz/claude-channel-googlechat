@@ -365,6 +365,7 @@ describe('the settings', () => {
   test('unset or empty: the default', () => {
     expect(boundedNumber('X', undefined, 14, 90)).toBe(14)
     expect(boundedNumber('X', '  ', 14, 90)).toBe(14)
+    expect(boundedNumber('X', undefined, 0, 90)).toBe(0)
   })
 
   test('a number is used, bounded above', () => {

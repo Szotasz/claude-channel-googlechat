@@ -76,11 +76,13 @@ export function boundedNumber(name: string, raw: string | undefined, fallback: n
 }
 
 // Local history (src/history.ts): what this bot saw, kept for a bounded time.
-export const HISTORY_DEFAULT_DAYS = 14
+// Off by default: it puts other people's message text on disk, so the operator
+// switches it on (GOOGLECHAT_HISTORY_DAYS=14, say); an update must not.
+export const HISTORY_DEFAULT_DAYS = 0
 export const HISTORY_MAX_DAYS = 90
 export const HISTORY_DEFAULT_MB = 5
 export const HISTORY_MAX_MB = 50
-/** Retention in days. 0 switches the local history off and removes the log. */
+/** Retention in days. 0 or unset: the local history is off, and a log left on disk is removed. */
 export const HISTORY_DAYS = boundedNumber(
   'GOOGLECHAT_HISTORY_DAYS',
   process.env.GOOGLECHAT_HISTORY_DAYS,

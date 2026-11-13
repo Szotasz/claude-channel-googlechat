@@ -15,11 +15,13 @@ import { toGchat, chunk } from './gchat-format.js'
 import {
   createMessage,
   createMessageWithAttachments,
+  getMessageThread,
   patchMessage,
   createReaction,
   uploadAttachment,
   downloadMedia,
 } from './chat-client.js'
+import { isKnownDm, replyToModeOf, resolveReplyThread, threadForPart } from './threading.js'
 
 // Refuse to ship the server's own state (e.g. sa-key.json, .env, access.json).
 // inbox/ is allowed — that's where downloads land.
@@ -62,7 +64,7 @@ export function registerTools(mcp: any): void {
       {
         name: 'reply',
         description:
-          'Reply on Google Chat. Pass chat_id (the space resource name, e.g. spaces/AAAA) from the inbound message. Optionally pass reply_to (a thread name, e.g. the inbound meta.thread) to thread the reply, and files (absolute paths) to attach.',
+          'Reply on Google Chat. Pass chat_id (the space resource name, e.g. spaces/AAAA) from the inbound message. Pass reply_to to answer in the thread of the question: the inbound meta.thread, or the inbound meta.message_id (it is resolved to its thread). Without reply_to the message starts a NEW thread. A reply_to that cannot be placed is an error and nothing is sent. files (absolute paths) are attached.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -70,7 +72,8 @@ export function registerTools(mcp: any): void {
             text: { type: 'string' },
             reply_to: {
               type: 'string',
-              description: 'Thread resource name to reply under (use meta.thread from the inbound block). Omit for a new thread.',
+              description:
+                'Where the reply goes: a thread name (spaces/X/threads/T, meta.thread from the inbound block) or a message name (spaces/X/messages/M, meta.message_id). Omit only to start a new thread.',
             },
             files: {
               type: 'array',
@@ -148,14 +151,51 @@ export function registerTools(mcp: any): void {
   })
 }
 
-async function handleReply(args: Record<string, unknown>) {
+/** What handleReply calls out to. Replaced in tests; the real ones otherwise. */
+export type ReplyDeps = {
+  assertAllowedChat: typeof assertAllowedChat
+  loadAccess: typeof loadAccess
+  createMessage: typeof createMessage
+  createMessageWithAttachments: typeof createMessageWithAttachments
+  uploadAttachment: typeof uploadAttachment
+  getMessageThread: typeof getMessageThread
+}
+
+const REAL_DEPS: ReplyDeps = {
+  assertAllowedChat,
+  loadAccess,
+  createMessage,
+  createMessageWithAttachments,
+  uploadAttachment,
+  getMessageThread,
+}
+
+/**
+ * `strict` says the create asked to fail rather than open a new thread (every
+ * space not known to be a direct message). Only then is the thread a likely
+ * cause, and only then can the hint name the way out for a DM this process has
+ * not heard from yet.
+ */
+function describeSendError(err: unknown, where: string, thread: string | undefined, strict: boolean, sent: string[]): Error {
+  const msg = err instanceof Error ? err.message : String(err)
+  const already = sent.length > 0 ? ` Already sent: ${sent.join(', ')}.` : ' Nothing was sent.'
+  const hint = !thread
+    ? ''
+    : strict
+      ? ` It was addressed to thread ${thread}; a thread that does not exist or cannot be replied to fails here instead of opening a new thread.` +
+        ' If this space is a direct message, send it again without reply_to.'
+      : ` It was addressed to thread ${thread}.`
+  return new Error(`${where} was not sent: ${msg}.${hint}${already}`)
+}
+
+export async function handleReply(args: Record<string, unknown>, deps: ReplyDeps = REAL_DEPS) {
   const chat_id = args.chat_id as string
   const text = (args.text as string) ?? ''
   const reply_to = args.reply_to != null ? String(args.reply_to) : undefined
   const files = (args.files as string[] | undefined) ?? []
   const format = (args.format as string | undefined) ?? 'text'
 
-  assertAllowedChat(chat_id)
+  deps.assertAllowedChat(chat_id)
   for (const f of files) {
     assertSendable(f)
     const st = statSync(f)
@@ -164,34 +204,63 @@ async function handleReply(args: Record<string, unknown>) {
     }
   }
 
-  const access = loadAccess()
+  const access = deps.loadAccess()
   const limit = Math.max(1, Math.min(access.textChunkLimit ?? MAX_CHUNK_LIMIT, MAX_CHUNK_LIMIT))
   const mode = access.chunkMode ?? 'length'
-  const replyMode = access.replyToMode ?? 'first'
-  // Only thread when reply_to is a thread resource name.
-  const thread = reply_to && reply_to.includes('/threads/') ? reply_to : undefined
+  const replyMode = replyToModeOf(access.replyToMode)
+  // Decided before anything is sent: a thread name, a message name resolved to
+  // its thread, or an error. Never a silent new thread (see threading.ts).
+  const thread = await resolveReplyThread(chat_id, reply_to, deps.getMessageThread)
   const body = toGchat(text, format)
   const chunks = chunk(body, limit, mode)
   const sentIds: string[] = []
+  // A direct message keeps the reply option it always had (a thread that
+  // cannot be replied to falls back to a new one): what a DM does with the
+  // strict option is not measured, see chat-client.ts. Everywhere else, and
+  // in a space this process has not heard from, the create fails instead.
+  const directMessage = isKnownDm(chat_id)
+  const create = { directMessage }
 
   for (let i = 0; i < chunks.length; i++) {
-    const useThread = thread && replyMode !== 'off' && (replyMode === 'all' || i === 0) ? thread : undefined
-    const sent = await createMessage(chat_id, chunks[i], useThread)
-    sentIds.push(sent.name)
+    const useThread = threadForPart(replyMode, i, thread)
+    try {
+      const sent = await deps.createMessage(chat_id, chunks[i], useThread, create)
+      sentIds.push(sent.name)
+    } catch (err) {
+      const where = chunks.length > 1 ? `part ${i + 1} of ${chunks.length}` : 'the message'
+      throw describeSendError(err, where, useThread, !directMessage, sentIds)
+    }
   }
 
   // Attachments go as a trailing message. Upload is best-effort; on failure we
   // post a text note rather than failing the whole reply.
   if (files.length > 0) {
+    // Unchanged: the attachment message goes into the thread whatever
+    // replyToMode says (that setting has only ever governed the text parts).
+    const fileThread = thread
     try {
       const uploaded: any[] = []
-      for (const f of files) uploaded.push(await uploadAttachment(chat_id, f, mimeFor(f)))
-      const sent = await createMessageWithAttachments(chat_id, '', uploaded, thread)
+      for (const f of files) uploaded.push(await deps.uploadAttachment(chat_id, f, mimeFor(f)))
+      const sent = await deps.createMessageWithAttachments(chat_id, '', uploaded, fileThread, create)
       sentIds.push(sent.name)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      const note = await createMessage(chat_id, `(attachment upload unavailable: ${msg})`, thread)
-      sentIds.push(note.name)
+      // The note goes where the attachment message was going. If that fails too
+      // (the thread, for one), say so like any other part: with the reason and
+      // with what is already out.
+      try {
+        const note = await deps.createMessage(chat_id, `(attachment upload unavailable: ${msg})`, fileThread, create)
+        sentIds.push(note.name)
+      } catch (noteErr) {
+        const noteMsg = noteErr instanceof Error ? noteErr.message : String(noteErr)
+        throw describeSendError(
+          new Error(`${msg}; the note about it could not be sent either: ${noteMsg}`),
+          'the attachment message',
+          fileThread,
+          !directMessage,
+          sentIds,
+        )
+      }
     }
   }
 

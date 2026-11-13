@@ -36,7 +36,7 @@ Arguments passed: `$ARGUMENTS`
   "spaces": { "spaces/AAAA": { "requireMention": true, "allowFrom": [] } },
   "mentionPatterns": ["^hey claude\\b"],
   "ackReaction": "👀",
-  "replyToMode": "first",
+  "replyToMode": "all",
   "textChunkLimit": 4096,
   "chunkMode": "newline"
 }
@@ -94,7 +94,9 @@ Delete `spaces[<spaces/XXX>]`, write.
 
 ### `set <key> <value>`
 Delivery/UX config. Keys: `ackReaction` (emoji or `""`), `replyToMode`
-(`off`|`first`|`all`), `textChunkLimit` (number), `chunkMode`
+(`off`|`first`|`all`; default `all`: every part of a split reply goes in the
+thread. `first` threads the first part only and each later part opens a thread
+of its own), `textChunkLimit` (number), `chunkMode`
 (`length`|`newline`), `mentionPatterns` (JSON array of regex strings). Validate,
 set, write, confirm.
 

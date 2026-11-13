@@ -59,7 +59,7 @@ can branch on it (e.g. give the owner full scope and company users a limited one
 
 | Tool | Purpose |
 | --- | --- |
-| `reply` | Send a message to a space; threads via `reply_to` (a thread name); attaches `files` (best-effort upload). |
+| `reply` | Send a message to a space; threads via `reply_to` (the inbound thread name or message name); a `reply_to` that cannot be placed is an error, nothing is sent; attaches `files` (best-effort upload). |
 | `react` | Add an emoji reaction. **Best-effort** — app reactions are restricted in many Workspace configs. |
 | `edit_message` | Edit one of the bot's own messages (interim progress). Not chunked. |
 | `download_attachment` | Download an uploaded attachment to the local inbox. (Drive-file attachments unsupported in v1.) |

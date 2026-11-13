@@ -60,7 +60,7 @@ const mcp = new Server(
     instructions: [
       'The sender reads Google Chat, not this session. Anything you want them to see must go through the reply tool — your transcript output never reaches their chat.',
       '',
-      'Messages arrive as <channel source="googlechat" chat_id="spaces/..." message_id="..." user="..." ts="...">. The meta also carries role ("owner" or "user") and, when threaded, thread. If the tag has image_path, Read that file. If it has attachment_file_id, call download_attachment with that id, then Read the returned path. Reply with the reply tool — pass chat_id back, and pass meta.thread as reply_to to keep the conversation in-thread.',
+      'Messages arrive as <channel source="googlechat" chat_id="spaces/..." message_id="..." user="..." ts="...">. The meta also carries role ("owner" or "user") and, when threaded, thread. If the tag has image_path, Read that file. If it has attachment_file_id, call download_attachment with that id, then Read the returned path. Reply with the reply tool: pass chat_id back, and pass meta.thread as reply_to to keep the conversation in-thread (meta.message_id works too: it is resolved to its thread). A reply with no reply_to starts a NEW thread. If reply fails because reply_to could not be placed, nothing was sent: fix reply_to and call it again.',
       '',
       'meta.role tells you who is talking. Treat "owner" as the privileged operator and "user" as a regular company user — apply whatever scoping the session requires.',
       '',

@@ -23,7 +23,7 @@ message (unless `GOOGLECHAT_ACCESS_MODE=static`). Managed only by
   },
   "mentionPatterns": ["^hey claude\\b"], // regexes that count as a mention
   "ackReaction": "👀",              // best-effort receipt reaction
-  "replyToMode": "first",           // off | first | all — chunk threading
+  "replyToMode": "all",             // off | first | all: which parts of a split reply go in the thread (default: all)
   "textChunkLimit": 4096,
   "chunkMode": "newline"            // length | newline
 }

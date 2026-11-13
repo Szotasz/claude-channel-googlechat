@@ -91,9 +91,24 @@ export function rememberedThread(message: string): string | undefined {
   return threadByMessage.get(message)
 }
 
+// Direct-message spaces this process delivered a message from. A threaded
+// create in one of these keeps the lenient reply option (see chat-client.ts):
+// what a DM does with the strict one has not been measured, and a DM is where
+// the owner talks to the bot. One entry per person who may DM the bot.
+const dmSpaces = new Set<string>()
+
+export function rememberDmSpace(space: string | undefined): void {
+  if (space) dmSpaces.add(space)
+}
+
+export function isKnownDm(space: string): boolean {
+  return dmSpaces.has(space)
+}
+
 /** Test hook. */
 export function forgetInbounds(): void {
   threadByMessage.clear()
+  dmSpaces.clear()
 }
 
 /**

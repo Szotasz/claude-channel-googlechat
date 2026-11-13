@@ -10,7 +10,7 @@ import { join } from 'path'
 import { STATE } from './state'
 
 const { handleEvent } = await import('../src/inbound')
-const { forgetInbounds, rememberedThread } = await import('../src/threading')
+const { forgetInbounds, isKnownDm, rememberedThread } = await import('../src/threading')
 const { handleReply } = await import('../src/tools')
 
 const SPACE = 'spaces/DM1'
@@ -85,6 +85,39 @@ describe('a delivered inbound', () => {
     expect(c.sent.length).toBe(1)
     expect('thread' in c.sent[0].params.meta).toBe(false)
     expect(rememberedThread(MESSAGE)).toBeUndefined()
+  })
+
+  test('a delivered direct message marks its space as a direct message', async () => {
+    expect(isKnownDm(SPACE)).toBe(false)
+    await handleEvent(event(), channel().mcp)
+    expect(isKnownDm(SPACE)).toBe(true)
+  })
+
+  test('a delivered message of a named space does not', async () => {
+    const ROOM = 'spaces/ROOM1'
+    writeFileSync(
+      join(STATE, 'access.json'),
+      JSON.stringify({
+        policy: 'allowlist',
+        owner: OWNER,
+        allowFrom: [],
+        allowDomains: [],
+        roles: {},
+        spaces: { [ROOM]: { requireMention: false } },
+      }),
+    )
+    const c = channel()
+    await handleEvent(
+      { type: 'MESSAGE', space: { name: ROOM, type: 'ROOM' }, message: { ...event().message, name: `${ROOM}/messages/M1` } },
+      c.mcp,
+    )
+    expect(c.sent.length).toBe(1)
+    expect(isKnownDm(ROOM)).toBe(false)
+  })
+
+  test('a direct message the gate drops does not mark its space', async () => {
+    await handleEvent(event({ sender: { name: 'users/999', email: 'stranger@example.com' } }), channel().mcp)
+    expect(isKnownDm(SPACE)).toBe(false)
   })
 
   test('a message the gate drops is not remembered', async () => {

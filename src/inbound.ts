@@ -11,7 +11,7 @@ import { gate, loadAccess, markDelivered, type Role } from './access.js'
 import { resolveEmail, displayUser, type Sender } from './identity.js'
 import { downloadMedia } from './chat-client.js'
 import type { ChatEvent } from './pubsub.js'
-import { rememberInbound } from './threading.js'
+import { rememberDmSpace, rememberInbound } from './threading.js'
 
 // Permission-reply spec (anthropics/claude-cli-internal): "yes/no <5 letters>".
 const PERMISSION_REPLY_RE = /^\s*(y|yes|n|no)\s+([a-km-z]{5})\s*$/i
@@ -155,6 +155,8 @@ export async function handleEvent(event: ChatEvent, mcp: { notification: (n: any
   // So a reply that names this message (reply_to = meta.message_id) can be
   // placed in its thread without asking the API.
   rememberInbound(messageId, threadName)
+  // A threaded reply in a direct message keeps the lenient reply option.
+  if (isDM) rememberDmSpace(spaceName)
 
   await mcp
     .notification({

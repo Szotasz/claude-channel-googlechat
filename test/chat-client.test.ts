@@ -19,6 +19,32 @@ describe('the create request', () => {
     })
   })
 
+  test('in a space known to be a direct message the threaded create keeps the lenient option', () => {
+    expect(createRequest(SPACE, 'hi', THREAD, undefined, { directMessage: true })).toEqual({
+      parent: SPACE,
+      messageReplyOption: 'REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD',
+      requestBody: { text: 'hi', thread: { name: THREAD } },
+    })
+    const att = [{ attachmentDataRef: { resourceName: 'r' } }]
+    expect(createRequest(SPACE, '', THREAD, att, { directMessage: true }).messageReplyOption).toBe(
+      'REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD',
+    )
+  })
+
+  test('not a direct message, said or unsaid: the strict option', () => {
+    expect(createRequest(SPACE, 'hi', THREAD, undefined, { directMessage: false }).messageReplyOption).toBe(
+      'REPLY_MESSAGE_OR_FAIL',
+    )
+    expect(createRequest(SPACE, 'hi', THREAD, undefined, {}).messageReplyOption).toBe('REPLY_MESSAGE_OR_FAIL')
+  })
+
+  test('an unthreaded message in a direct message carries no reply option either', () => {
+    expect(createRequest(SPACE, 'hi', undefined, undefined, { directMessage: true })).toEqual({
+      parent: SPACE,
+      requestBody: { text: 'hi' },
+    })
+  })
+
   test('an unthreaded message carries no thread and no reply option', () => {
     expect(createRequest(SPACE, 'hi')).toEqual({ parent: SPACE, requestBody: { text: 'hi' } })
   })

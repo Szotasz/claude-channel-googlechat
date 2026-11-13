@@ -21,7 +21,7 @@ import {
   uploadAttachment,
   downloadMedia,
 } from './chat-client.js'
-import { replyToModeOf, resolveReplyThread, threadForPart } from './threading.js'
+import { isKnownDm, replyToModeOf, resolveReplyThread, threadForPart } from './threading.js'
 
 // Refuse to ship the server's own state (e.g. sa-key.json, .env, access.json).
 // inbox/ is allowed — that's where downloads land.
@@ -170,13 +170,21 @@ const REAL_DEPS: ReplyDeps = {
   getMessageThread,
 }
 
-function describeSendError(err: unknown, thread: string | undefined, sent: string[], part: number, parts: number): Error {
+/**
+ * `strict` says the create asked to fail rather than open a new thread (every
+ * space not known to be a direct message). Only then is the thread a likely
+ * cause, and only then can the hint name the way out for a DM this process has
+ * not heard from yet.
+ */
+function describeSendError(err: unknown, where: string, thread: string | undefined, strict: boolean, sent: string[]): Error {
   const msg = err instanceof Error ? err.message : String(err)
-  const where = parts > 1 ? `part ${part + 1} of ${parts}` : 'the message'
   const already = sent.length > 0 ? ` Already sent: ${sent.join(', ')}.` : ' Nothing was sent.'
-  const hint = thread
-    ? ` It was addressed to thread ${thread}; a thread that does not exist or cannot be replied to fails here instead of opening a new thread.`
-    : ''
+  const hint = !thread
+    ? ''
+    : strict
+      ? ` It was addressed to thread ${thread}; a thread that does not exist or cannot be replied to fails here instead of opening a new thread.` +
+        ' If this space is a direct message, send it again without reply_to.'
+      : ` It was addressed to thread ${thread}.`
   return new Error(`${where} was not sent: ${msg}.${hint}${already}`)
 }
 
@@ -206,14 +214,21 @@ export async function handleReply(args: Record<string, unknown>, deps: ReplyDeps
   const body = toGchat(text, format)
   const chunks = chunk(body, limit, mode)
   const sentIds: string[] = []
+  // A direct message keeps the reply option it always had (a thread that
+  // cannot be replied to falls back to a new one): what a DM does with the
+  // strict option is not measured, see chat-client.ts. Everywhere else, and
+  // in a space this process has not heard from, the create fails instead.
+  const directMessage = isKnownDm(chat_id)
+  const create = { directMessage }
 
   for (let i = 0; i < chunks.length; i++) {
     const useThread = threadForPart(replyMode, i, thread)
     try {
-      const sent = await deps.createMessage(chat_id, chunks[i], useThread)
+      const sent = await deps.createMessage(chat_id, chunks[i], useThread, create)
       sentIds.push(sent.name)
     } catch (err) {
-      throw describeSendError(err, useThread, sentIds, i, chunks.length)
+      const where = chunks.length > 1 ? `part ${i + 1} of ${chunks.length}` : 'the message'
+      throw describeSendError(err, where, useThread, !directMessage, sentIds)
     }
   }
 
@@ -226,12 +241,26 @@ export async function handleReply(args: Record<string, unknown>, deps: ReplyDeps
     try {
       const uploaded: any[] = []
       for (const f of files) uploaded.push(await deps.uploadAttachment(chat_id, f, mimeFor(f)))
-      const sent = await deps.createMessageWithAttachments(chat_id, '', uploaded, fileThread)
+      const sent = await deps.createMessageWithAttachments(chat_id, '', uploaded, fileThread, create)
       sentIds.push(sent.name)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      const note = await deps.createMessage(chat_id, `(attachment upload unavailable: ${msg})`, fileThread)
-      sentIds.push(note.name)
+      // The note goes where the attachment message was going. If that fails too
+      // (the thread, for one), say so like any other part: with the reason and
+      // with what is already out.
+      try {
+        const note = await deps.createMessage(chat_id, `(attachment upload unavailable: ${msg})`, fileThread, create)
+        sentIds.push(note.name)
+      } catch (noteErr) {
+        const noteMsg = noteErr instanceof Error ? noteErr.message : String(noteErr)
+        throw describeSendError(
+          new Error(`${msg}; the note about it could not be sent either: ${noteMsg}`),
+          'the attachment message',
+          fileThread,
+          !directMessage,
+          sentIds,
+        )
+      }
     }
   }
 

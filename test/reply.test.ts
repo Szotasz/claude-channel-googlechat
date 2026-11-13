@@ -10,7 +10,7 @@ import { join } from 'path'
 import { STATE } from './state'
 
 const { handleReply } = await import('../src/tools')
-const { forgetInbounds, rememberInbound } = await import('../src/threading')
+const { forgetInbounds, rememberDmSpace, rememberInbound } = await import('../src/threading')
 type ReplyDeps = import('../src/tools').ReplyDeps
 
 const SPACE = 'spaces/AAAA1'
@@ -116,6 +116,83 @@ describe('a reply that cannot be placed sends NOTHING', () => {
   })
 })
 
+describe('a direct message keeps the lenient reply option until a DM is measured', () => {
+  // What each create was asked: the stand-ins record the options they were given.
+  function recording(over: Partial<ReplyDeps> = {}) {
+    const asked: Array<{ kind: string; thread: string | undefined; directMessage: unknown }> = []
+    const w = world({}, {
+      createMessage: async (_space, _text, thread, opts) => {
+        asked.push({ kind: 'text', thread, directMessage: opts?.directMessage })
+        return { name: `${SPACE}/messages/OUT${asked.length}` }
+      },
+      createMessageWithAttachments: async (_space, _text, _attachments, thread, opts) => {
+        asked.push({ kind: 'files', thread, directMessage: opts?.directMessage })
+        return { name: `${SPACE}/messages/OUT${asked.length}` }
+      },
+      ...over,
+    })
+    return { ...w, asked }
+  }
+  const outside = join(tmpdir(), 'gchat-reply-test-dm-note.txt')
+  writeFileSync(outside, 'x')
+
+  test('a space known to be a direct message: every create is told so', async () => {
+    rememberDmSpace(SPACE)
+    const w = recording()
+    await handleReply({ chat_id: SPACE, text: LONG, reply_to: THREAD, format: 'markdownv2', files: [outside] }, w.deps)
+    expect(w.asked).toEqual([
+      { kind: 'text', thread: THREAD, directMessage: true },
+      { kind: 'text', thread: THREAD, directMessage: true },
+      { kind: 'text', thread: THREAD, directMessage: true },
+      { kind: 'files', thread: THREAD, directMessage: true },
+    ])
+  })
+
+  test('any other space, and a space this process has not heard from: strict', async () => {
+    rememberDmSpace('spaces/SOMEONEELSE')
+    const w = recording()
+    await handleReply({ chat_id: SPACE, text: 'ok', reply_to: THREAD, files: [outside] }, w.deps)
+    expect(w.asked).toEqual([
+      { kind: 'text', thread: THREAD, directMessage: false },
+      { kind: 'files', thread: THREAD, directMessage: false },
+    ])
+  })
+
+  test('the note about a failed upload is told the same', async () => {
+    rememberDmSpace(SPACE)
+    const w = recording({
+      uploadAttachment: async () => {
+        throw new Error('upload not enabled')
+      },
+    })
+    await handleReply({ chat_id: SPACE, text: 'ok', reply_to: THREAD, files: [outside] }, w.deps)
+    expect(w.asked.map(a => a.directMessage)).toEqual([true, true])
+  })
+
+  test('a strict failure tells how to resend if the space is a direct message after all', async () => {
+    const w = world({}, {
+      createMessage: async () => {
+        throw new Error('INVALID_ARGUMENT')
+      },
+    })
+    const p = handleReply({ chat_id: SPACE, text: 'ok', reply_to: THREAD }, w.deps)
+    await expect(p).rejects.toThrow(/fails here instead of opening a new thread/)
+    await expect(p).rejects.toThrow(/If this space is a direct message, send it again without reply_to/)
+  })
+
+  test('a failure in a known direct message does not blame the thread or offer that way out', async () => {
+    rememberDmSpace(SPACE)
+    const w = world({}, {
+      createMessage: async () => {
+        throw new Error('503 backend error')
+      },
+    })
+    const p = handleReply({ chat_id: SPACE, text: 'ok', reply_to: THREAD }, w.deps)
+    await expect(p).rejects.toThrow(new RegExp(`the message was not sent: 503 backend error\\. It was addressed to thread ${THREAD}\\. Nothing was sent\\.`))
+    await expect(p).rejects.not.toThrow(/send it again without reply_to/)
+  })
+})
+
 describe('a reply the plugin splits', () => {
   test('default setting: EVERY part is in the thread', async () => {
     const w = world()
@@ -187,6 +264,23 @@ describe('attachments', () => {
     const w = world()
     await handleReply({ chat_id: SPACE, text: 'ok', reply_to: MESSAGE, files: [outside] }, w.deps)
     expect(w.created.map(c => c.thread)).toEqual([THREAD, THREAD])
+  })
+
+  test('the attachment message AND its note both fail: the error says why, where, and what is already out', async () => {
+    const w = world({}, {
+      createMessage: async (_space, text, thread) => {
+        if (text.startsWith('(attachment upload unavailable')) throw new Error('NOT_FOUND: thread not found')
+        w.created.push({ text, thread, files: 0 })
+        return { name: `${SPACE}/messages/OUT${w.created.length}` }
+      },
+      createMessageWithAttachments: async () => {
+        throw new Error('NOT_FOUND: thread not found')
+      },
+    })
+    const p = handleReply({ chat_id: SPACE, text: 'ok', reply_to: THREAD, files: [outside] }, w.deps)
+    await expect(p).rejects.toThrow(/the attachment message was not sent: NOT_FOUND: thread not found; the note about it could not be sent either: NOT_FOUND: thread not found\./)
+    await expect(p).rejects.toThrow(new RegExp(`addressed to thread ${THREAD}`))
+    await expect(p).rejects.toThrow(new RegExp(`Already sent: ${SPACE}/messages/OUT1\\.`))
   })
 
   test('the channel state is still not sendable', async () => {

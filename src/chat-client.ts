@@ -25,20 +25,37 @@ export type SentMessage = { name: string }
  * REPLY_MESSAGE_OR_FAIL returns NOT_FOUND instead of starting a new thread
  * (google.chat.v1.CreateMessageRequest.MessageReplyOption). The fallback
  * variant used before made a wrong thread name look like a sent reply.
- * The option is documented as "only supported in named spaces"; what a direct
- * message space does with it has not been measured here.
+ *
+ * The option is documented as "only supported in named spaces", and what a
+ * direct message space does with the strict one has not been measured here.
+ * If a DM rejected it, every threaded reply in a DM would fail, the owner's
+ * included. So a space known to be a DM keeps the variant it always had; the
+ * caller says which (CreateOptions.directMessage). Once a DM is measured to
+ * accept REPLY_MESSAGE_OR_FAIL, THREADED_REPLY_DM can become the same value.
  */
 const THREADED_REPLY = 'REPLY_MESSAGE_OR_FAIL'
+const THREADED_REPLY_DM = 'REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD'
+
+export type CreateOptions = {
+  /** The space is known to be a direct message: a threaded create may fall back to a new thread. */
+  directMessage?: boolean
+}
 
 /**
  * The spaces.messages.create request for a text and/or attachment message.
  * Pure, so what is asked of the API can be tested without calling it: a
  * threaded message names its thread AND asks to fail rather than fall back.
  */
-export function createRequest(space: string, text: string, threadName?: string, attachments?: any[]) {
+export function createRequest(
+  space: string,
+  text: string,
+  threadName?: string,
+  attachments?: any[],
+  opts: CreateOptions = {},
+) {
   return {
     parent: space,
-    ...(threadName ? { messageReplyOption: THREADED_REPLY } : {}),
+    ...(threadName ? { messageReplyOption: opts.directMessage ? THREADED_REPLY_DM : THREADED_REPLY } : {}),
     requestBody: {
       ...(text || !attachments ? { text } : {}),
       ...(attachments ? { attachment: attachments } : {}),
@@ -52,8 +69,9 @@ export async function createMessage(
   space: string,
   text: string,
   threadName?: string,
+  opts: CreateOptions = {},
 ): Promise<SentMessage> {
-  const res = await chat().spaces.messages.create(createRequest(space, text, threadName))
+  const res = await chat().spaces.messages.create(createRequest(space, text, threadName, undefined, opts))
   return { name: res.data.name ?? '' }
 }
 
@@ -63,8 +81,9 @@ export async function createMessageWithAttachments(
   text: string,
   attachments: any[],
   threadName?: string,
+  opts: CreateOptions = {},
 ): Promise<SentMessage> {
-  const res = await chat().spaces.messages.create(createRequest(space, text, threadName, attachments))
+  const res = await chat().spaces.messages.create(createRequest(space, text, threadName, attachments, opts))
   return { name: res.data.name ?? '' }
 }
 
